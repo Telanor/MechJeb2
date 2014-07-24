@@ -162,7 +162,7 @@ namespace MuMech
             var stats = core.GetComputerModule<MechJebModuleStageStats>();
             stats.RequestUpdate(this);
 
-            for (int i = stats.vacStats.Length - 1; i >= 0 && dvLeft > 0; i--)
+            for (int i = stats.vacStats.Count - 1; i >= 0 && dvLeft > 0; i--)
             {
                 var s = stats.vacStats[i];
                 if (s.deltaV <= 0 || s.startThrust <= 0) continue;
@@ -185,7 +185,7 @@ namespace MuMech
                 // all but the current stage. This is wrong, but hopefully it's
                 // close enough for now.
                 // TODO: Be smarter about throttle limits on future stages.
-                if (i == stats.vacStats.Length - 1)
+                if (i == stats.vacStats.Count - 1)
                 {
                     stageAvgAccel *= vesselState.throttleLimit;
                 }

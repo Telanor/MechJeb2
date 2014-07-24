@@ -683,8 +683,8 @@ namespace MuMech
         [Persistent(pass = (int)Pass.Global)]
         public int TWRbody = 1;
 
-        private FuelFlowSimulation.Stats[] vacStats;
-        private FuelFlowSimulation.Stats[] atmoStats;
+        private List<FuelFlowSimulation.Stats> vacStats;
+        private List<FuelFlowSimulation.Stats> atmoStats;
 
         [GeneralInfoItem("Stage stats (all)", InfoItem.Category.Vessel, showInEditor = true)]
         public void AllStageStats()
@@ -699,7 +699,7 @@ namespace MuMech
                 stats.RequestUpdate(this);
             }
 
-            int numStages = atmoStats.Length;
+            int numStages = atmoStats.Count;
             var stages = Enumerable.Range(0, numStages);
 
             GUILayout.BeginVertical();
@@ -794,9 +794,9 @@ namespace MuMech
             MechJebModuleStageStats stats = core.GetComputerModule<MechJebModuleStageStats>();
             stats.RequestUpdate(this);
 
-            if (stats.vacStats.Length == 0) return 0;
+            if (stats.vacStats.Count == 0) return 0;
 
-            return stats.vacStats[stats.vacStats.Length - 1].deltaV;
+            return stats.vacStats[stats.vacStats.Count - 1].deltaV;
         }
 
         [ValueInfoItem("Stage ΔV (atmo)", InfoItem.Category.Vessel, format = "F0", units = "m/s", showInEditor = true)]
@@ -805,9 +805,9 @@ namespace MuMech
             MechJebModuleStageStats stats = core.GetComputerModule<MechJebModuleStageStats>();
             stats.RequestUpdate(this);
 
-            if (stats.atmoStats.Length == 0) return 0;
+            if (stats.atmoStats.Count == 0) return 0;
 
-            return stats.atmoStats[stats.atmoStats.Length - 1].deltaV;
+            return stats.atmoStats[stats.atmoStats.Count - 1].deltaV;
         }
 
         [ValueInfoItem("Stage ΔV (atmo, vac)", InfoItem.Category.Vessel, units = "m/s", showInEditor = true)]
@@ -816,8 +816,8 @@ namespace MuMech
             MechJebModuleStageStats stats = core.GetComputerModule<MechJebModuleStageStats>();
             stats.RequestUpdate(this);
 
-            float atmDv = (stats.atmoStats.Length == 0) ? 0 : stats.atmoStats[stats.atmoStats.Length - 1].deltaV;
-            float vacDv = (stats.vacStats.Length == 0) ? 0 : stats.vacStats[stats.vacStats.Length - 1].deltaV;
+            float atmDv = (stats.atmoStats.Count == 0) ? 0 : stats.atmoStats[stats.atmoStats.Count - 1].deltaV;
+            float vacDv = (stats.vacStats.Count == 0) ? 0 : stats.vacStats[stats.vacStats.Count - 1].deltaV;
 
             return String.Format("{0:F0}, {1:F0}", atmDv, vacDv);
         }
@@ -828,10 +828,10 @@ namespace MuMech
             MechJebModuleStageStats stats = core.GetComputerModule<MechJebModuleStageStats>();
             stats.RequestUpdate(this);
 
-            if (stats.vacStats.Length == 0 || stats.atmoStats.Length == 0) return 0;
+            if (stats.vacStats.Count == 0 || stats.atmoStats.Count == 0) return 0;
 
-            float vacTimeLeft = stats.vacStats[stats.vacStats.Length - 1].deltaTime;
-            float atmoTimeLeft = stats.atmoStats[stats.atmoStats.Length - 1].deltaTime;
+            float vacTimeLeft = stats.vacStats[stats.vacStats.Count - 1].deltaTime;
+            float atmoTimeLeft = stats.atmoStats[stats.atmoStats.Count - 1].deltaTime;
             float timeLeft = Mathf.Lerp(vacTimeLeft, atmoTimeLeft, Mathf.Clamp01((float)FlightGlobals.getStaticPressure()));
 
             return timeLeft;

@@ -19,8 +19,8 @@ namespace MuMech
         [ToggleInfoItem("ΔV include cosine losses", InfoItem.Category.Thrust, showInEditor = true)]
         public bool dVLinearThrust = true;
 
-	    public FuelFlowSimulation.Stats[] atmoStats = {};
-	    public FuelFlowSimulation.Stats[] vacStats = {};
+	    public List<FuelFlowSimulation.Stats> atmoStats = new List<FuelFlowSimulation.Stats>();
+	    public List<FuelFlowSimulation.Stats> vacStats = new List<FuelFlowSimulation.Stats>();
 
 		private readonly ObjectPool<FuelFlowSimulation> simulationPool = new ObjectPool<FuelFlowSimulation>(() => new FuelFlowSimulation(), 10);
 
@@ -117,6 +117,7 @@ namespace MuMech
 
 		    public void Dispose()
 		    {
+				//Let the FuelFlowSimulation objects return any of their own pool items
 				AtmoSimulation.Resource.Dispose();
 				VacSimulation.Resource.Dispose();
 
@@ -131,12 +132,10 @@ namespace MuMech
             {
                 //Run the simulation
 				var sims = (SimulationSet)o;
-                var newAtmoStats = sims.AtmoSimulation.Resource.SimulateAllStages(1.0f, 1.0f);
-                var newVacStats = sims.VacSimulation.Resource.SimulateAllStages(1.0f, 0.0f);
+				sims.AtmoSimulation.Resource.SimulateAllStages(1.0f, 1.0f, atmoStats);
+				sims.VacSimulation.Resource.SimulateAllStages(1.0f, 0.0f, vacStats);
 
-                atmoStats = newAtmoStats;
-                vacStats = newVacStats;
-
+				//Return to pool
 				sims.Dispose();
 
                 //see how long the simulation took

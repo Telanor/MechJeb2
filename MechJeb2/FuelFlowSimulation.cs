@@ -81,11 +81,20 @@ namespace MuMech
 	        }
         }
 
+		//Internal stages list
+		private readonly List<Stats> stages = new List<Stats>(10);
         //Simulate the activation and execution of each stage of the rocket,
         //and return stats for each stage
-        public Stats[] SimulateAllStages(float throttle, float atmospheres)
+        public void SimulateAllStages(float throttle, float atmospheres, List<Stats> statOutput)
         {
-            Stats[] stages = new Stats[simStage];
+			//Clear the list then add blank stat elements to be replaced later
+			//This is preferable to allocating a fixed-size array every time since the list can (usually) be resized without any allocations occuring
+			stages.Clear();
+
+			for(var i = 0; i < simStage; i++)
+			{
+				stages.Add(new Stats());
+			}
 
             print("SimulateAllStages starting from stage " + simStage);
             SimulateStageActivation();
@@ -93,14 +102,16 @@ namespace MuMech
             while (simStage >= 0)
             {
                 print("Simulating stage " + simStage + "(vessel mass = " + VesselMass() + ")");
-                stages[simStage] = SimulateStage(throttle, atmospheres);
+				stages[simStage] = SimulateStage(throttle, atmospheres);
                 print("Staging at t = " + t);
                 SimulateStageActivation();
             }
 
-            print("SimulateAllStages ended");
+			//Copy from the internal stages list to the statOutput list in one step to avoid flickering in the GUI
+	        statOutput.Clear();
+			statOutput.AddRange(stages);
 
-            return stages;
+            print("SimulateAllStages ended");
         }
 
 		private static readonly Queue<string> messageQueue = new Queue<string>(); 
@@ -187,19 +198,34 @@ namespace MuMech
             return stats;
         }
 
+		//Reusable list of decoupled nodes
+		private readonly List<FuelNode> decoupledNodes = new List<FuelNode>(PreallocateSize);
         //Active the next stage of the simulated rocket and remove all nodes that get decoupled by the new stage
         public void SimulateStageActivation()
         {
             simStage--;
 
-            List<FuelNode> decoupledNodes = nodes.Where(n => n.decoupledInStage == simStage).ToList();
+			//This will cause a heap allocation, which is a no-no
+			//List<FuelNode> decoupledNodes = nodes.Where(n => n.decoupledInStage == simStage).ToList();
 
-            foreach (FuelNode d in decoupledNodes) nodes.Remove(d); //remove the decoupled nodes from the simulated ship
+	        decoupledNodes.Clear();
 
-            foreach (FuelNode n in nodes)
-            {
-                foreach (FuelNode d in decoupledNodes) n.RemoveSourceNode(d); //remove the decoupled nodes from the remaining nodes' source lists
-            }
+			foreach(var node in nodes)
+			{
+				if(node.decoupledInStage == simStage)
+				{
+					decoupledNodes.Add(node);
+				}
+			}
+
+			foreach(var node in decoupledNodes) nodes.Remove(node); //remove the decoupled nodes from the simulated ship
+
+			foreach(var node in nodes)
+			{
+				foreach(var decoupledNode in decoupledNodes) node.RemoveSourceNode(decoupledNode); //remove the decoupled nodes from the remaining nodes' source lists
+			}
+
+	       
         }
 
         //Whether we've used up the current stage
