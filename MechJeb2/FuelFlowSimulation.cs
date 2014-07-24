@@ -1,37 +1,84 @@
-﻿using System;
+﻿using MechJeb2;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
 {
-    public class FuelFlowSimulation
+    public class FuelFlowSimulation : IDisposable
     {
+		private const int PreallocateSize = 200; //Pre-allocate size to reduce the need for resizing later
+
+		//Pool of fuel nodes
+	    private static readonly ObjectPool<FuelNode> fuelNodePool = new ObjectPool<FuelNode>(() => new FuelNode(), PreallocateSize);
+		//a list of PoolItem<FuelNode>s used by this instance
+		//These are kept as a separate list so they can be disposed of without having to muddy up every use of the nodes list by having to call .Resource
+		private readonly List<PoolItem<FuelNode>> poolFuelNodes = new List<PoolItem<FuelNode>>(PreallocateSize);
+
         public int simStage; //the simulated rocket's current stage
-        List<FuelNode> nodes; //a list of FuelNodes representing all the parts of the ship
         public float t;
 
+		//Allocate the list/dictionary once and just reuse each time
+		private readonly Dictionary<Part, FuelNode> nodeLookup = new Dictionary<Part, FuelNode>(PreallocateSize);
+		readonly List<FuelNode> nodes = new List<FuelNode>(PreallocateSize); //a list of FuelNodes representing all the parts of the ship
+
         //Takes a list of parts so that the simulation can be run in the editor as well as the flight scene
-        public FuelFlowSimulation(List<Part> parts, bool dVLinearThrust)
+        public void Initialize(List<Part> parts, bool dVLinearThrust)
         {
             //Initialize the simulation
-            nodes = new List<FuelNode>();
-            Dictionary<Part, FuelNode> nodeLookup = parts.ToDictionary(p => p, p => new FuelNode(p, dVLinearThrust));
-            nodes = nodeLookup.Values.ToList();
+            //nodes = new List<FuelNode>();
+            //Dictionary<Part, FuelNode> nodeLookup = parts.ToDictionary(p => p, p => new FuelNode(p, dVLinearThrust));
 
-            foreach (Part p in parts) nodeLookup[p].FindSourceNodes(p, nodeLookup);
+	        nodeLookup.Clear();
+			nodes.Clear();
+
+			PrintThreaded(String.Format("Pool size before: {0} ", fuelNodePool.Count));
+
+	        if(poolFuelNodes.Count > 0)
+	        {
+		        Debug.LogError("ERROR1!! Pool fuel nodes not disposed!");
+				PrintThreaded("ERROR2!! Pool fuel nodes not disposed!");
+	        }
+
+	        foreach(var part in parts)
+	        {
+		        var fuelNode = fuelNodePool.Acquire();
+				fuelNode.Resource.Initialize(part, dVLinearThrust);
+
+				poolFuelNodes.Add(fuelNode);
+		        nodeLookup.Add(part, fuelNode.Resource);
+				nodes.Add(fuelNode.Resource);
+	        }
+
+			PrintThreaded(String.Format("Pool size after: {0} ", fuelNodePool.Count));
+
+            //nodes = nodeLookup.Values.ToList();
+            //foreach (Part p in parts) nodeLookup[p].FindSourceNodes(p, nodeLookup);
+
+			foreach(var kvp in nodeLookup)
+			{
+				kvp.Value.FindSourceNodes(kvp.Key, nodeLookup);
+			}
 
             simStage = Staging.lastStage + 1;
 
             // Add a fake stage if we are beyond the first one
-            // Mostly usefull for the Node Executor who use the last stage info
+            // Mostly useful for the Node Executor who use the last stage info
             // and fail to get proper info when the ship was never staged and 
             // some engine were activated manualy
             if (Staging.CurrentStage > Staging.lastStage) 
                 simStage++;
 
             t = 0;
+
+	        lock(messageQueue)
+	        {
+		        while(messageQueue.Count > 0)
+		        {
+			        Debug.Log(messageQueue.Dequeue());
+		        }
+	        }
         }
 
         //Simulate the activation and execution of each stage of the rocket,
@@ -56,6 +103,14 @@ namespace MuMech
             return stages;
         }
 
+		private static readonly Queue<string> messageQueue = new Queue<string>(); 
+
+	    public static void PrintThreaded(string message)
+	    {
+		    lock(messageQueue)
+				messageQueue.Enqueue(message);
+	    }
+
         public static void print(object message)
         {
             //MonoBehaviour.print("[MechJeb2] " + message);
@@ -73,7 +128,7 @@ namespace MuMech
             stats.deltaTime = 0;
             stats.deltaV = 0;
 
-            foreach (FuelNode n in nodes) n.SetConsumptionRates(throttle, atmospheres); //need to set initial consumption rates for allowedToStage to work right
+            foreach (var n in nodes) n.SetConsumptionRates(throttle, atmospheres); //need to set initial consumption rates for allowedToStage to work right
 
             const int maxSteps = 100;
             int step;
@@ -280,6 +335,18 @@ namespace MuMech
                 };
             }
         }
+
+	    public void Dispose()
+	    {
+		    foreach(var poolItem in poolFuelNodes)
+		    {
+			    poolItem.Dispose();
+		    }
+
+			PrintThreaded("Disposed " + poolFuelNodes.Count);
+
+		    poolFuelNodes.Clear();
+	    }
     }
 
     //A FuelNode is a compact summary of a Part, containing only the information needed to run the fuel flow simulation. 
@@ -318,7 +385,7 @@ namespace MuMech
 
         public string partName; //for debugging
 
-        public FuelNode(Part part, bool dVLinearThrust)
+        public void Initialize(Part part, bool dVLinearThrust)
         {            
             if (part.IsPhysicallySignificant()) dryMass = part.mass;
 

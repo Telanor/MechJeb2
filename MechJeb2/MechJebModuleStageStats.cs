@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using MechJeb2;
 using UnityEngine;
 using System.Threading;
 
@@ -18,8 +19,10 @@ namespace MuMech
         [ToggleInfoItem("ΔV include cosine losses", InfoItem.Category.Thrust, showInEditor = true)]
         public bool dVLinearThrust = true;
 
-        public FuelFlowSimulation.Stats[] atmoStats = { };
-        public FuelFlowSimulation.Stats[] vacStats = { };
+	    public FuelFlowSimulation.Stats[] atmoStats = {};
+	    public FuelFlowSimulation.Stats[] vacStats = {};
+
+		private readonly ObjectPool<FuelFlowSimulation> simulationPool = new ObjectPool<FuelFlowSimulation>(() => new FuelFlowSimulation(), 10);
 
         public void RequestUpdate(object controller)
         {
@@ -51,7 +54,7 @@ namespace MuMech
         {
             TryStartSimulation();
         }
-
+		
         public void TryStartSimulation()
         {
             if ((HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel) && !simulationRunning)
@@ -85,23 +88,56 @@ namespace MuMech
 
             //Create two FuelFlowSimulations, one for vacuum and one for atmosphere
             List<Part> parts = (HighLogic.LoadedSceneIsEditor ? EditorLogic.SortedShipList : vessel.parts);
-            FuelFlowSimulation[] sims = { new FuelFlowSimulation(parts, dVLinearThrust), new FuelFlowSimulation(parts, dVLinearThrust) };
+            //FuelFlowSimulation[] sims = { new FuelFlowSimulation(parts, dVLinearThrust), new FuelFlowSimulation(parts, dVLinearThrust) };
+
+			//Acquire and initialize simulation objects
+	        var atmoSim = simulationPool.Acquire();
+	        var vacSim = simulationPool.Acquire();
+
+			atmoSim.Resource.Initialize(parts, dVLinearThrust);
+			vacSim.Resource.Initialize(parts, dVLinearThrust);
+
+	        var simulationSet = new SimulationSet(atmoSim, vacSim);
 
             //Run the simulation in a separate thread
-            ThreadPool.QueueUserWorkItem(RunSimulation, sims);
+			ThreadPool.QueueUserWorkItem(RunSimulation, simulationSet);
             //RunSimulation(sims);
         }
+
+	    private struct SimulationSet : IDisposable
+	    {
+		    public readonly PoolItem<FuelFlowSimulation> AtmoSimulation;
+		    public readonly PoolItem<FuelFlowSimulation> VacSimulation;
+
+		    public SimulationSet(PoolItem<FuelFlowSimulation> atmoSimulation, PoolItem<FuelFlowSimulation> vacSimulation)
+		    {
+			    AtmoSimulation = atmoSimulation;
+			    VacSimulation = vacSimulation;
+		    }
+
+		    public void Dispose()
+		    {
+				AtmoSimulation.Resource.Dispose();
+				VacSimulation.Resource.Dispose();
+
+				AtmoSimulation.Dispose();
+				VacSimulation.Dispose();
+		    }
+	    }
 
         protected void RunSimulation(object o)
         {
             try
             {
                 //Run the simulation
-                FuelFlowSimulation[] sims = (FuelFlowSimulation[])o;
-                FuelFlowSimulation.Stats[] newAtmoStats = sims[0].SimulateAllStages(1.0f, 1.0f);
-                FuelFlowSimulation.Stats[] newVacStats = sims[1].SimulateAllStages(1.0f, 0.0f);
+				var sims = (SimulationSet)o;
+                var newAtmoStats = sims.AtmoSimulation.Resource.SimulateAllStages(1.0f, 1.0f);
+                var newVacStats = sims.VacSimulation.Resource.SimulateAllStages(1.0f, 0.0f);
+
                 atmoStats = newAtmoStats;
                 vacStats = newVacStats;
+
+				sims.Dispose();
 
                 //see how long the simulation took
                 stopwatch.Stop();
