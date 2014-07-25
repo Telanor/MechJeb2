@@ -378,9 +378,9 @@ namespace MuMech
     //A FuelNode is a compact summary of a Part, containing only the information needed to run the fuel flow simulation. 
     public class FuelNode
     {
-        DefaultableDictionary<int, float> resources = new DefaultableDictionary<int, float>(0);       //the resources contained in the part
-        Dictionary<int, float> resourceConsumptions = new Dictionary<int, float>();                   //the resources this part consumes per unit time when active at full throttle
-        DefaultableDictionary<int, float> resourceDrains = new DefaultableDictionary<int, float>(0);  //the resources being drained from this part per unit time at the current simulation time
+        readonly DefaultableDictionary<int, float> resources = new DefaultableDictionary<int, float>(0);       //the resources contained in the part
+		readonly Dictionary<int, float> resourceConsumptions = new Dictionary<int, float>();                   //the resources this part consumes per unit time when active at full throttle
+		readonly DefaultableDictionary<int, float> resourceDrains = new DefaultableDictionary<int, float>(0);  //the resources being drained from this part per unit time at the current simulation time
 
         // if a resource amount falls below this amount we say that the resource has been drained
         // set to the smallest amount that the user can see is non-zero in the resource tab or by
@@ -389,12 +389,12 @@ namespace MuMech
 
         public FloatCurve ispCurve;                     //the function that gives Isp as a function of atmospheric pressure for this part, if it's an engine
         public bool correctThrust = false;              // does the engine use a fixed ISP / Variable Thrust
-        Dictionary<int, float> propellantRatios; //ratios of propellants used by this engine
+		readonly Dictionary<int, float> propellantRatios = new Dictionary<int, float>(); //ratios of propellants used by this engine
         float propellantSumRatioTimesDensity;    //a number used in computing propellant consumption rates
 
-        HashSet<FuelNode> sourceNodes = new HashSet<FuelNode>();  //a set of FuelNodes that this node could draw fuel or resources from (for resources that use the ResourceFlowMode STACK_PRIORITY_SEARCH).
+		readonly HashSet<FuelNode> sourceNodes = new HashSet<FuelNode>();  //a set of FuelNodes that this node could draw fuel or resources from (for resources that use the ResourceFlowMode STACK_PRIORITY_SEARCH).
         FuelNode parent;
-        List<int> resourcesUnobtainableFromParent = new List<int>();
+		readonly List<int> resourcesUnobtainableFromParent = new List<int>();
         bool surfaceMounted;
 
         public float maxThrust = 0;     //max thrust of this part
@@ -412,8 +412,20 @@ namespace MuMech
         public string partName; //for debugging
 
         public void Initialize(Part part, bool dVLinearThrust)
-        {            
-            if (part.IsPhysicallySignificant()) dryMass = part.mass;
+        {
+			//Clear out any lists and reset variables
+			resources.Clear();
+			resourceDrains.Clear();
+	        propellantRatios.Clear();
+			sourceNodes.Clear();
+	        resourcesUnobtainableFromParent.Clear();
+	        propellantSumRatioTimesDensity = 0;
+	        parent = null;
+	        maxThrust = 0;
+	        fwdThrustRatio = 1;
+	        isEngine = false;
+
+	        if (part.IsPhysicallySignificant()) dryMass = part.mass;
 
             inverseStage = part.inverseStage;
             isFuelLine = (part is FuelLine);
@@ -466,7 +478,14 @@ namespace MuMech
                     ispCurve = engine.atmosphereCurve;
 
                     propellantSumRatioTimesDensity = engine.propellants.Sum(prop => prop.ratio * MuUtils.ResourceDensity(prop.id));
-                    propellantRatios = engine.propellants.Where(prop => PartResourceLibrary.Instance.GetDefinition(prop.id).density > 0 && prop.name != "IntakeAir" ).ToDictionary(prop => prop.id, prop => prop.ratio);
+                    //Naughty heap allocation
+					//propellantRatios = engine.propellants.Where(prop => PartResourceLibrary.Instance.GetDefinition(prop.id).density > 0 && prop.name != "IntakeAir" ).ToDictionary(prop => prop.id, prop => prop.ratio);
+
+	                foreach(var propellant in engine.propellants)
+	                {
+		                if(PartResourceLibrary.Instance.GetDefinition(propellant.id).density > 0 && propellant.name != "IntakeAir")
+			                propellantRatios[propellant.id] = propellant.ratio;
+	                }
                 }
             }
 
@@ -510,7 +529,13 @@ namespace MuMech
                     ispCurve = enginefx.atmosphereCurve;
 
                     propellantSumRatioTimesDensity = enginefx.propellants.Sum(prop => prop.ratio * MuUtils.ResourceDensity(prop.id));
-                    propellantRatios = enginefx.propellants.Where(prop => PartResourceLibrary.Instance.GetDefinition(prop.id).density > 0 && prop.name != "IntakeAir").ToDictionary(prop => prop.id, prop => prop.ratio);
+                    //propellantRatios = enginefx.propellants.Where(prop => PartResourceLibrary.Instance.GetDefinition(prop.id).density > 0 && prop.name != "IntakeAir").ToDictionary(prop => prop.id, prop => prop.ratio);
+
+					foreach(var propellant in enginefx.propellants)
+					{
+						if(PartResourceLibrary.Instance.GetDefinition(propellant.id).density > 0 && propellant.name != "IntakeAir")
+							propellantRatios[propellant.id] = propellant.ratio;
+					}
                 }
             }
 
@@ -546,7 +571,15 @@ namespace MuMech
                 if (correctThrust) massFlowRate = massFlowRate * Isp / ispCurve.Evaluate(0); // scale thrust
 
                 //propellant consumption rate = ratio * massFlowRate / sum(ratio * density)
-                resourceConsumptions = propellantRatios.Keys.ToDictionary(id => id, id => propellantRatios[id] * massFlowRate / propellantSumRatioTimesDensity);
+				//Heap allocation, tsk tsk
+                //resourceConsumptions = propellantRatios.Keys.ToDictionary(id => id, id => propellantRatios[id] * massFlowRate / propellantSumRatioTimesDensity);
+
+	            resourceConsumptions.Clear();
+				//It's important to not loop .Keys, it generates garbage (heap allocation)
+	            foreach(var kvp in propellantRatios)
+	            {
+		            resourceConsumptions[kvp.Key] = kvp.Value * massFlowRate / propellantSumRatioTimesDensity;
+	            }
             }
         }
 
