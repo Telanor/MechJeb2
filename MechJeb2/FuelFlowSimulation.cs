@@ -1,8 +1,11 @@
-﻿using MechJeb2;
+﻿using System.Diagnostics;
+using System.IO;
+using MechJeb2;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace MuMech
 {
@@ -72,6 +75,7 @@ namespace MuMech
 
             t = 0;
 
+#if(DEBUG)
 	        lock(messageQueue)
 	        {
 		        while(messageQueue.Count > 0)
@@ -79,6 +83,7 @@ namespace MuMech
 			        Debug.Log(messageQueue.Dequeue());
 		        }
 	        }
+#endif
         }
 
 		//Internal stages list
@@ -116,15 +121,18 @@ namespace MuMech
 
 		private static readonly Queue<string> messageQueue = new Queue<string>(); 
 
+		[Conditional("DEBUG")]
 	    public static void PrintThreaded(string message)
 	    {
 		    lock(messageQueue)
 				messageQueue.Enqueue(message);
 	    }
 
+		[Conditional("DEBUG")]
         public static void print(object message)
         {
-            //MonoBehaviour.print("[MechJeb2] " + message);
+            Debug.Log("[MechJeb2] " + message);
+			PrintThreaded(message.ToString());
         }
         
         //Simulate (the rest of) the current stage of the simulated rocket,
@@ -588,8 +596,11 @@ namespace MuMech
         public void FindSourceNodes(Part part, Dictionary<Part, FuelNode> nodeLookup)
         {
             //we can draw fuel from any fuel lines that point to this part
-            foreach (Part p in nodeLookup.Keys)
+			//Don't loop the .Keys property, it creates garbage
+            foreach (var kvp in nodeLookup)
             {
+	            var p = kvp.Key;
+
                 if (p is FuelLine)
                     print("FuelLine ");
                 if (p is FuelLine && ((FuelLine)p).target == part)
@@ -659,7 +670,16 @@ namespace MuMech
         {
             get
             {
-                return dryMass + resources.Keys.Sum(id => resources[id] * MuUtils.ResourceDensity(id));
+				//A lambda function accessing resources variable will allocate an object, use a loop instead
+                //return dryMass + resources.Keys.Sum(id => resources[id] * MuUtils.ResourceDensity(id));
+				var sum = dryMass;
+
+				foreach(var kvp in resources)
+				{
+					sum += kvp.Value * MuUtils.ResourceDensity(kvp.Key);
+				}
+
+	            return sum;
             }
         }
 
@@ -675,12 +695,44 @@ namespace MuMech
 
         public float MaxTimeStep()
         {
-            if (!resourceDrains.Keys.Any(id => resources[id] > DRAINED)) return float.MaxValue;
-            print("resourceDrains.Keys.Where(id => resources[id] > DRAINED).Count() = " + resourceDrains.Keys.Count(id => resources[id] > DRAINED));
-            return resourceDrains.Keys.Where(id => resources[id] > DRAINED).Min(id => resources[id] / resourceDrains[id]);
+			//LINQ and lambda functions tend to cause heap allocations
+	        //if (!resourceDrains.Keys.Any(id => resources[id] > DRAINED)) return float.MaxValue;
+			//print("resourceDrains.Keys.Where(id => resources[id] > DRAINED).Count() = " + resourceDrains.Keys.Count(id => resources[id] > DRAINED));
+			//return resourceDrains.Keys.Where(id => resources[id] > DRAINED).Min(id => resources[id] / resourceDrains[id]);
+
+	        var fuelRemaining = false;
+
+	        foreach(var kvp in resourceDrains)
+	        {
+		        if(resources[kvp.Key] > DRAINED)
+		        {
+			        fuelRemaining = true;
+			        break;
+		        }
+	        }
+
+	        if(!fuelRemaining)
+		        return float.MaxValue;
+
+	        var min = float.MaxValue;
+
+	        foreach(var kvp in resourceDrains)
+	        {
+		        var amount = resources[kvp.Key];
+
+				if(amount > DRAINED)
+		        {
+					var value = amount / kvp.Value;
+
+			        if(value < min)
+				        min = value;
+		        }
+	        }
+
+	        return min;
         }
 
-        //Returns an enumeration of the resources this part burns 
+	    //Returns an enumeration of the resources this part burns 
         public IEnumerable<int> BurnedResources()
         {
             return resourceConsumptions.Keys;
@@ -694,8 +746,10 @@ namespace MuMech
 
         public bool CanDrawNeededResources(List<FuelNode> vessel)
         {
-            foreach (int type in resourceConsumptions.Keys)
+            foreach (var kvp in resourceConsumptions)
             {
+	            var type = kvp.Key;
+
                 switch (PartResourceLibrary.Instance.GetDefinition(type).resourceFlowMode)
                 {
                     case ResourceFlowMode.NO_FLOW:
@@ -723,17 +777,20 @@ namespace MuMech
 
         public void DebugDrainRates()
         {
-            foreach (int type in resourceDrains.Keys)
+            foreach (var kvp in resourceDrains)
             {
+	            var type = kvp.Key;
+
                 print(partName + "'s drain rate of " + PartResourceLibrary.Instance.GetDefinition(type).name + " is " + resourceDrains[type]);
             }
         }
 
         public void AssignResourceDrainRates(List<FuelNode> vessel)
         {
-            foreach (int type in resourceConsumptions.Keys)
+            foreach (var kvp in resourceConsumptions)
             {
-                float amount = resourceConsumptions[type];
+	            var type = kvp.Key;
+                var amount = resourceConsumptions[type];
 
                 switch (PartResourceLibrary.Instance.GetDefinition(type).resourceFlowMode)
                 {
